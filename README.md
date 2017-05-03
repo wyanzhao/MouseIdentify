@@ -1,2 +1,2 @@
 # MouseIdentify
-A mouse driver that can idenfity the click from different touchscreen or mouse devices.
+A mouse filter driver that can idenfity the click from different touchscreen or mouse devices.
