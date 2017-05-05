@@ -24,6 +24,7 @@ Notes:
 #pragma alloc_text (PAGE, MouFilter_EvtIoInternalDeviceControl)
 #endif
 
+ULONG InstanceNo = 0;
 #pragma warning(push)
 #pragma warning(disable:4055) // type case from PVOID to PSERVICE_CALLBACK_ROUTINE
 #pragma warning(disable:4152) // function/data pointer conversion in expression
@@ -72,6 +73,7 @@ Routine Description:
         DebugPrint( ("WdfDriverCreate failed with status 0x%x\n", status));
     }
 
+	
     return status; 
 }
 
@@ -108,7 +110,10 @@ Return Value:
     WDF_OBJECT_ATTRIBUTES   deviceAttributes;
     NTSTATUS                            status;
     WDFDEVICE                          hDevice;
+	WDFQUEUE                           hQueue;
+	PDEVICE_EXTENSION       filterExt;
     WDF_IO_QUEUE_CONFIG        ioQueueConfig;
+	HANDLE                     handle;
     
     UNREFERENCED_PARAMETER(Driver);
 
@@ -140,6 +145,22 @@ Return Value:
         return status;
     }
 
+	filterExt = FilterGetData(hDevice);
+
+	if (0 == filterExt->AppendDevice)
+	{
+		
+		UNICODE_STRING DriverName;
+		RtlInitUnicodeString(&DriverName, L"\\BaseNamedObjects\\MouseFilter");
+		filterExt->Event = IoCreateNotificationEvent(&DriverName, &handle);
+		if (NULL == filterExt->Event)
+		{
+			DebugPrint(("Event Created failed\n"));
+			return STATUS_UNSUCCESSFUL;
+		}
+		KeClearEvent(filterExt->Event);
+	}
+	filterExt->AppendDevice++;
 
     //
     // Configure the default queue to be Parallel. Do not use sequential queue
@@ -167,6 +188,24 @@ Return Value:
         DebugPrint( ("WdfIoQueueCreate failed 0x%x\n", status));
         return status;
     }
+
+	WDF_IO_QUEUE_CONFIG_INIT(&ioQueueConfig,
+		WdfIoQueueDispatchParallel);
+
+	ioQueueConfig.EvtIoDeviceControl = MouFilter_EvtIoDeviceControlFromRawPdo;
+	status = WdfIoQueueCreate(hDevice,
+		&ioQueueConfig,
+		WDF_NO_OBJECT_ATTRIBUTES,
+		&hQueue
+	);
+	if (!NT_SUCCESS(status)) {
+		DebugPrint(("WdfIoQueueCreate failed 0x%x\n", status));
+		return status;
+	}
+
+	filterExt->rawPdoQueue = hQueue;
+
+	status = MouFilter_CreateRawPdo(hDevice, ++InstanceNo);
 
     return status;
 }
@@ -506,13 +545,104 @@ Return Value:
 	pMouseData = InputDataStart;
 	if (pMouseData->ButtonFlags & MOUSE_LEFT_BUTTON_DOWN)
 	{
-		DbgPrint("ID:%d Mouse Left Clicked\n", pMouseData->UnitId);
+		KdPrint(("ID:%d Mouse Left Clicked\n", pMouseData->UnitId));
+		InstanceNo = pMouseData->UnitId;
+		KeSetEvent(devExt->Event, 0, FALSE);
+		KeResetEvent(devExt->Event);
 	}
 	else if (pMouseData->ButtonFlags & MOUSE_RIGHT_BUTTON_DOWN)
 	{
-		DbgPrint("ID:%d Mouse Right Clicked\n", pMouseData->UnitId);
+		KdPrint(("ID:%d Mouse Right Clicked\n", pMouseData->UnitId));
+		InstanceNo = pMouseData->UnitId;
+		KeSetEvent(devExt->Event, 0, FALSE);
+		KeResetEvent(devExt->Event);
+	}
+	
+}
+
+
+VOID MouFilter_EvtIoDeviceControlFromRawPdo(IN WDFQUEUE Queue, IN WDFREQUEST Request, IN size_t OutputBufferLength, IN size_t InputBufferLength, IN ULONG IoControlCode)
+/*++
+
+Routine Description:
+
+This routine is the dispatch routine for device control requests.
+
+Arguments:
+
+Queue - Handle to the framework queue object that is associated
+with the I/O request.
+Request - Handle to a framework request object.
+
+OutputBufferLength - length of the request's output buffer,
+if an output buffer is available.
+InputBufferLength - length of the request's input buffer,
+if an input buffer is available.
+
+IoControlCode - the driver-defined or system-defined I/O control code
+(IOCTL) that is associated with the request.
+
+Return Value:
+
+VOID
+
+--*/
+{
+	NTSTATUS status = STATUS_SUCCESS;
+	WDFDEVICE hDevice;
+	WDFMEMORY outputMemory;
+	PDEVICE_EXTENSION devExt;
+	size_t bytesTransferred = 0;
+
+	UNREFERENCED_PARAMETER(InputBufferLength);
+
+	DebugPrint(("Entered KbFilter_EvtIoInternalDeviceControl\n"));
+
+	hDevice = WdfIoQueueGetDevice(Queue);
+	devExt = FilterGetData(hDevice);
+
+	//
+	// Process the ioctl and complete it when you are done.
+	//
+
+	switch (IoControlCode) {
+	case IOCTL_MOUFILTR_GET_MOUSE_ATTRIBUTES:
+		//
+		// Buffer is too small, fail the request
+		//
+		if (OutputBufferLength < sizeof(ULONG)) {
+			status = STATUS_BUFFER_TOO_SMALL;
+			break;
+		}
+
+		status = WdfRequestRetrieveOutputMemory(Request, &outputMemory);
+
+		if (!NT_SUCCESS(status)) {
+			DebugPrint(("WdfRequestRetrieveOutputMemory failed %x\n", status));
+			break;
+		}
+
+		status = WdfMemoryCopyFromBuffer(outputMemory,
+			0,
+			&InstanceNo,
+			sizeof(ULONG));
+
+		if (!NT_SUCCESS(status)) {
+			DebugPrint(("WdfMemoryCopyFromBuffer failed %x\n", status));
+			break;
+		}
+
+		bytesTransferred = sizeof(ULONG);
+
+		break;
+	default:
+		status = STATUS_NOT_IMPLEMENTED;
+		break;
 	}
 
-} 
+	WdfRequestCompleteWithInformation(Request, status, bytesTransferred);
+
+	return;
+}
 
 #pragma warning(pop)

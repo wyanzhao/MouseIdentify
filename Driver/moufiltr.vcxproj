@@ -111,6 +111,9 @@
       <ExceptionHandling>
       </ExceptionHandling>
     </ClCompile>
+    <Link>
+      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\wdmsec.lib;$(DDK_LIB_PATH)\ntstrsafe.lib;$(DDK_LIB_PATH)\rtlver.lib</AdditionalDependencies>
+    </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -118,10 +121,15 @@
       <WarningLevel>Level4</WarningLevel>
       <ExceptionHandling>
       </ExceptionHandling>
+      <PreprocessorDefinitions>_X86_=1;i386=1;STD_CALL;%(PreprocessorDefinitions);</PreprocessorDefinitions>
     </ClCompile>
+    <Link>
+      <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\wdmsec.lib;$(DDK_LIB_PATH)\ntstrsafe.lib;$(DDK_LIB_PATH)\rtlver.lib</AdditionalDependencies>
+    </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="moufiltr.c" />
+    <ClCompile Include="rawpdo.c" />
     <ResourceCompile Include="moufiltr.rc" />
   </ItemGroup>
   <ItemGroup>
