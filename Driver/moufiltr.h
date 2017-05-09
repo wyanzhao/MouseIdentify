@@ -113,8 +113,7 @@ typedef struct _DEVICE_EXTENSION
     // The real connect data that this driver reports to
     //
     CONNECT_DATA UpperConnectData;
-	ULONG AppendDevice;
-	PKEVENT Event;
+	ULONG MouseId;
 } DEVICE_EXTENSION, *PDEVICE_EXTENSION;
 
 

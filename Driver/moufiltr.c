@@ -24,7 +24,15 @@ Notes:
 #pragma alloc_text (PAGE, MouFilter_EvtIoInternalDeviceControl)
 #endif
 
+enum {
+	SET_FLAG = 0,
+	ID = 1
+};
 ULONG InstanceNo = 0;
+ULONG id_map[100][2];
+ULONG CurrentId;
+ULONG AppendDevice;
+PKEVENT pkEvent;
 #pragma warning(push)
 #pragma warning(disable:4055) // type case from PVOID to PSERVICE_CALLBACK_ROUTINE
 #pragma warning(disable:4152) // function/data pointer conversion in expression
@@ -147,20 +155,19 @@ Return Value:
 
 	filterExt = FilterGetData(hDevice);
 
-	if (0 == filterExt->AppendDevice)
+	if (0 == InstanceNo)
 	{
 		
 		UNICODE_STRING DriverName;
 		RtlInitUnicodeString(&DriverName, L"\\BaseNamedObjects\\MouseFilter");
-		filterExt->Event = IoCreateNotificationEvent(&DriverName, &handle);
-		if (NULL == filterExt->Event)
+		pkEvent = IoCreateNotificationEvent(&DriverName, &handle);
+		if (NULL == pkEvent)
 		{
 			DebugPrint(("Event Created failed\n"));
 			return STATUS_UNSUCCESSFUL;
 		}
-		KeClearEvent(filterExt->Event);
+		KeClearEvent(pkEvent);
 	}
-	filterExt->AppendDevice++;
 
     //
     // Configure the default queue to be Parallel. Do not use sequential queue
@@ -205,7 +212,7 @@ Return Value:
 
 	filterExt->rawPdoQueue = hQueue;
 
-	status = MouFilter_CreateRawPdo(hDevice, ++InstanceNo);
+	status = MouFilter_CreateRawPdo(hDevice, InstanceNo++);
 
     return status;
 }
@@ -490,72 +497,77 @@ Return Value:
 
 VOID
 MouFilter_ServiceCallback(
-    IN PDEVICE_OBJECT DeviceObject,
-    IN PMOUSE_INPUT_DATA InputDataStart,
-    IN PMOUSE_INPUT_DATA InputDataEnd,
-    IN OUT PULONG InputDataConsumed
-    )
+	IN PDEVICE_OBJECT DeviceObject,
+	IN PMOUSE_INPUT_DATA InputDataStart,
+	IN PMOUSE_INPUT_DATA InputDataEnd,
+	IN OUT PULONG InputDataConsumed
+)
 /*++
 
 Routine Description:
 
-    Called when there are mouse packets to report to the RIT.  You can do 
-    anything you like to the packets.  For instance:
-    
-    o Drop a packet altogether
-    o Mutate the contents of a packet 
-    o Insert packets into the stream 
-                    
+	Called when there are mouse packets to report to the RIT.  You can do
+	anything you like to the packets.  For instance:
+
+	o Drop a packet altogether
+	o Mutate the contents of a packet
+	o Insert packets into the stream
+
 Arguments:
 
-    DeviceObject - Context passed during the connect IOCTL
-    
-    InputDataStart - First packet to be reported
-    
-    InputDataEnd - One past the last packet to be reported.  Total number of
-                   packets is equal to InputDataEnd - InputDataStart
-    
-    InputDataConsumed - Set to the total number of packets consumed by the RIT
-                        (via the function pointer we replaced in the connect
-                        IOCTL)
+	DeviceObject - Context passed during the connect IOCTL
+
+	InputDataStart - First packet to be reported
+
+	InputDataEnd - One past the last packet to be reported.  Total number of
+				   packets is equal to InputDataEnd - InputDataStart
+
+	InputDataConsumed - Set to the total number of packets consumed by the RIT
+						(via the function pointer we replaced in the connect
+						IOCTL)
 
 Return Value:
 
-    Status is returned.
+	Status is returned.
 
 --*/
 {
-    PDEVICE_EXTENSION   devExt;
-    WDFDEVICE   hDevice;
+	PDEVICE_EXTENSION   devExt;
+	WDFDEVICE   hDevice;
 	PMOUSE_INPUT_DATA pMouseData;
 	//KdPrint(("Enter MouFilter_ServiceCallback\n"));
-    hDevice = WdfWdmDeviceGetWdfDeviceHandle(DeviceObject);
+	hDevice = WdfWdmDeviceGetWdfDeviceHandle(DeviceObject);
 
-    devExt = FilterGetData(hDevice);
-    //
-    // UpperConnectData must be called at DISPATCH
-    //
-    (*(PSERVICE_CALLBACK_ROUTINE) devExt->UpperConnectData.ClassService)(
-        devExt->UpperConnectData.ClassDeviceObject,
-        InputDataStart,
-        InputDataEnd,
-        InputDataConsumed
-        );
+	devExt = FilterGetData(hDevice);
+	//
+	// UpperConnectData must be called at DISPATCH
+	//
+	(*(PSERVICE_CALLBACK_ROUTINE)devExt->UpperConnectData.ClassService)(
+		devExt->UpperConnectData.ClassDeviceObject,
+		InputDataStart,
+		InputDataEnd,
+		InputDataConsumed
+		);
 
 	pMouseData = InputDataStart;
+	CurrentId = pMouseData->UnitId;
+	if (id_map[CurrentId][SET_FLAG] == FALSE)
+	{
+		id_map[CurrentId][SET_FLAG] = TRUE;
+		id_map[CurrentId][ID] = AppendDevice++;
+	}
+
 	if (pMouseData->ButtonFlags & MOUSE_LEFT_BUTTON_DOWN)
 	{
-		KdPrint(("ID:%d Mouse Left Clicked\n", pMouseData->UnitId));
-		InstanceNo = pMouseData->UnitId;
-		KeSetEvent(devExt->Event, 0, FALSE);
-		KeResetEvent(devExt->Event);
+		KdPrint(("ID:%d Mouse Left Clicked\n", id_map[CurrentId][ID]));
+		KeSetEvent(pkEvent, 0, FALSE);
+		KeResetEvent(pkEvent);
 	}
 	else if (pMouseData->ButtonFlags & MOUSE_RIGHT_BUTTON_DOWN)
 	{
-		KdPrint(("ID:%d Mouse Right Clicked\n", pMouseData->UnitId));
-		InstanceNo = pMouseData->UnitId;
-		KeSetEvent(devExt->Event, 0, FALSE);
-		KeResetEvent(devExt->Event);
+		KdPrint(("ID:%d Mouse Right Clicked\n", id_map[CurrentId][ID]));
+		KeSetEvent(pkEvent, 0, FALSE);
+		KeResetEvent(pkEvent);
 	}
 	
 }
@@ -624,7 +636,7 @@ VOID
 
 		status = WdfMemoryCopyFromBuffer(outputMemory,
 			0,
-			&InstanceNo,
+			&id_map[CurrentId][ID],
 			sizeof(ULONG));
 
 		if (!NT_SUCCESS(status)) {

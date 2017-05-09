@@ -19,10 +19,10 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="moufiltr.c">
+    <ClCompile Include="rawpdo.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="rawpdo.c">
+    <ClCompile Include="moufiltr.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
